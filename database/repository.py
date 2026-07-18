@@ -364,11 +364,24 @@ async def find_mandatory_expense(
         user_id,
     )
 
+    print("========")
+    print("TEXT:", text)
+
+    for expense in expenses:
+        print(
+            expense.name,
+            expense.amount,
+            expense.paid_amount,
+        )
+
     text = text.lower()
 
     for expense in expenses:
         if expense.name.lower() in text:
+            print("FOUND:", expense.name)
             return expense
+
+    print("NOT FOUND")
 
     return None
 
