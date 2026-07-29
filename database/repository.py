@@ -723,12 +723,6 @@ async def clear_user_data(
     )
 
     await session.execute(
-        delete(CreditCard).where(
-            CreditCard.user_id == user_id
-        )
-    )
-
-    await session.execute(
         delete(MandatoryExpense).where(
             MandatoryExpense.user_id == user_id
         )
@@ -740,7 +734,29 @@ async def clear_user_data(
         )
     )
 
+    credit_card = await session.get(
+        CreditCard,
+        user_id,
+    )
+
+    if credit_card is None:
+        session.add(
+            CreditCard(
+                user_id=user_id,
+                credit_limit=DEFAULT_CREDIT_LIMIT,
+                balance=0,
+            )
+        )
+    else:
+        credit_card.credit_limit = DEFAULT_CREDIT_LIMIT
+        credit_card.balance = 0
+
     await session.commit()
+
+    await ensure_monthly_mandatory_expenses(
+        session=session,
+        user_id=user_id,
+    )
 
 
 async def get_history(
