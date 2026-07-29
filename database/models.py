@@ -73,12 +73,16 @@ class Transaction(Base):
         nullable=True,
     )
 
+    is_credit_card: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=func.now(),
         index=True,
     )
-
 
 class CreditCard(Base):
     __tablename__ = "credit_cards"
@@ -87,6 +91,11 @@ class CreditCard(Base):
         BigInteger,
         ForeignKey("users.telegram_id", ondelete="CASCADE"),
         primary_key=True,
+    )
+
+    credit_limit: Mapped[int] = mapped_column(
+        Integer,
+        default=220000,
     )
 
     balance: Mapped[int] = mapped_column(

@@ -7,9 +7,7 @@ from database.repository import (
     ensure_user,
     get_balance,
     get_credit_card_balance,
-    get_main_message_id,
     get_monthly_mandatory_expenses,
-    save_main_message_id,
 )
 
 from database.session import session_factory
@@ -23,7 +21,6 @@ from utils.dates import (
 
 from utils.messages import delete_user_message
 from utils.screens import show_screen
-
 
 
 router = Router()
@@ -55,7 +52,11 @@ async def build_main_screen(user_id: int) -> str:
             user_id,
         )
 
-        credit_card = await get_credit_card_balance(
+        (
+            credit_limit,
+            credit_spent,
+            credit_available,
+        ) = await get_credit_card_balance(
             session,
             user_id,
         )
@@ -65,10 +66,8 @@ async def build_main_screen(user_id: int) -> str:
             user_id,
         )
 
-
     mandatory_lines = []
     mandatory_total = 0
-
 
     for expense in mandatory_expenses:
 
@@ -91,9 +90,7 @@ async def build_main_screen(user_id: int) -> str:
 
             continue
 
-
         mandatory_total += remaining
-
 
         if expense.paid_amount > 0:
 
@@ -110,24 +107,23 @@ async def build_main_screen(user_id: int) -> str:
                 f"{format_money(expense.amount)}"
             )
 
-
     mandatory_text = (
         "\n".join(mandatory_lines)
         if mandatory_lines
         else "Обязательных расходов пока нет"
     )
 
-
     days = get_days_until_salary()
     salary_date = get_next_salary_date()
-
 
     return (
         "🐱 <b>MonttiMoney</b>\n\n"
         "💰 <b>Баланс</b>\n"
         f"{format_money(balance)}\n\n"
         "💳 <b>Кредитка</b>\n"
-        f"{format_money(credit_card)}\n\n"
+        f"Лимит: {format_money(credit_limit)}\n"
+        f"Потрачено: {format_money(credit_spent)}\n"
+        f"Осталось: {format_money(credit_available)}\n\n"
         "📅 <b>До зарплаты</b>\n"
         f"{format_days(days)} · "
         f"{salary_date.strftime('%d.%m')}\n\n"
@@ -145,7 +141,6 @@ async def show_main_screen(
     if message.from_user is None:
         return
 
-
     await show_screen(
         message,
         await build_main_screen(
@@ -154,7 +149,7 @@ async def show_main_screen(
         reply_markup=main_keyboard,
         parse_mode="HTML",
     )
-    
+
 
 @router.message(F.text == "🏠 Главный экран")
 async def main_screen_button(
@@ -168,6 +163,7 @@ async def main_screen_button(
 
     await show_main_screen(message)
 
+
 @router.message(CommandStart())
 async def start_handler(
     message: Message,
@@ -175,7 +171,6 @@ async def start_handler(
 
     if message.from_user is None:
         return
-
 
     async with session_factory() as session:
 
@@ -189,7 +184,6 @@ async def start_handler(
             session=session,
             user_id=message.from_user.id,
         )
-
 
     await delete_user_message(message)
 

@@ -1,18 +1,20 @@
 from datetime import date, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import (
+    CategoryKeyword,
     CreditCard,
     MandatoryExpense,
     MandatoryTemplate,
+    SavingGoal,
     Transaction,
     User,
-    SavingGoal,
 )
 
 
+DEFAULT_CREDIT_LIMIT = 220_000
 
 DEFAULT_MANDATORY_TEMPLATES = (
     ("Маникюр", 2700),
@@ -36,12 +38,16 @@ async def ensure_user(
             )
         )
 
-    credit_card = await session.get(CreditCard, telegram_id)
+    credit_card = await session.get(
+        CreditCard,
+        telegram_id,
+    )
 
     if credit_card is None:
         session.add(
             CreditCard(
                 user_id=telegram_id,
+                credit_limit=DEFAULT_CREDIT_LIMIT,
                 balance=0,
             )
         )
@@ -53,7 +59,6 @@ async def ensure_default_mandatory_templates(
     session: AsyncSession,
     user_id: int,
 ) -> None:
-
     existing = list(
         (
             await session.scalars(
@@ -87,7 +92,6 @@ async def ensure_monthly_mandatory_expenses(
     session: AsyncSession,
     user_id: int,
 ) -> None:
-
     today = date.today()
 
     await ensure_default_mandatory_templates(
@@ -124,7 +128,6 @@ async def ensure_monthly_mandatory_expenses(
     }
 
     for template in templates:
-
         if template.id not in existing_ids:
             session.add(
                 MandatoryExpense(
@@ -148,7 +151,6 @@ async def add_mandatory_template(
     name: str,
     amount: int,
 ) -> MandatoryTemplate:
-
     template = MandatoryTemplate(
         user_id=user_id,
         name=name,
@@ -186,7 +188,6 @@ async def update_mandatory_template(
     template: MandatoryTemplate,
     new_amount: int,
 ) -> MandatoryTemplate:
-
     template.amount = new_amount
 
     today = date.today()
@@ -212,7 +213,6 @@ async def disable_mandatory_template(
     session: AsyncSession,
     template: MandatoryTemplate,
 ) -> MandatoryTemplate:
-
     template.is_active = False
 
     await session.commit()
@@ -228,14 +228,15 @@ async def add_transaction(
     amount: int,
     description: str,
     category: str | None = None,
+    is_credit_card: bool = False,
 ) -> Transaction:
-
     transaction = Transaction(
         user_id=user_id,
         operation_type=operation_type,
         amount=amount,
         description=description,
         category=category,
+        is_credit_card=is_credit_card,
     )
 
     session.add(transaction)
@@ -250,24 +251,28 @@ async def clear_test_data(
     session: AsyncSession,
     user_id: int,
 ) -> None:
-
-    # удаляем тестовые доходы и расходы
     await session.execute(
-        Transaction.__table__.delete().where(
+        delete(Transaction).where(
             Transaction.user_id == user_id
         )
     )
 
-    # удаляем платежи текущего месяца
     await session.execute(
-        MandatoryExpense.__table__.delete().where(
+        delete(MandatoryExpense).where(
             MandatoryExpense.user_id == user_id
         )
     )
 
+    credit_card = await session.get(
+        CreditCard,
+        user_id,
+    )
+
+    if credit_card is not None:
+        credit_card.balance = 0
+
     await session.commit()
 
-    # создаём обязательные платежи заново
     await ensure_monthly_mandatory_expenses(
         session,
         user_id,
@@ -278,11 +283,13 @@ async def get_balance(
     session: AsyncSession,
     user_id: int,
 ) -> int:
-
     income = int(
         await session.scalar(
             select(
-                func.coalesce(func.sum(Transaction.amount), 0)
+                func.coalesce(
+                    func.sum(Transaction.amount),
+                    0,
+                )
             ).where(
                 Transaction.user_id == user_id,
                 Transaction.operation_type == "income",
@@ -294,10 +301,14 @@ async def get_balance(
     expenses = int(
         await session.scalar(
             select(
-                func.coalesce(func.sum(Transaction.amount), 0)
+                func.coalesce(
+                    func.sum(Transaction.amount),
+                    0,
+                )
             ).where(
                 Transaction.user_id == user_id,
                 Transaction.operation_type == "expense",
+                Transaction.is_credit_card.is_(False),
             )
         )
         or 0
@@ -309,79 +320,79 @@ async def get_balance(
 async def get_credit_card_balance(
     session: AsyncSession,
     user_id: int,
-) -> int:
-
+) -> tuple[int, int, int]:
     credit_card = await session.get(
         CreditCard,
         user_id,
     )
 
-    return credit_card.balance if credit_card else 0
+    if credit_card is None:
+        return (
+            DEFAULT_CREDIT_LIMIT,
+            0,
+            DEFAULT_CREDIT_LIMIT,
+        )
+
+    credit_limit = credit_card.credit_limit
+    spent_amount = credit_card.balance
+
+    available_amount = max(
+        credit_limit - spent_amount,
+        0,
+    )
+
+    return (
+        credit_limit,
+        spent_amount,
+        available_amount,
+    )
 
 
 async def get_monthly_mandatory_expenses(
     session: AsyncSession,
     user_id: int,
 ) -> list[MandatoryExpense]:
-
     today = date.today()
-
 
     await ensure_monthly_mandatory_expenses(
         session,
         user_id,
     )
 
-
     result = await session.scalars(
         select(MandatoryExpense)
         .join(
             MandatoryTemplate,
-            MandatoryExpense.template_id == MandatoryTemplate.id,
+            MandatoryExpense.template_id
+            == MandatoryTemplate.id,
         )
         .where(
             MandatoryExpense.user_id == user_id,
             MandatoryExpense.month == today.month,
             MandatoryExpense.year == today.year,
-            MandatoryTemplate.is_active == True,
+            MandatoryTemplate.is_active.is_(True),
         )
-        .order_by(
-            MandatoryExpense.id
-        )
+        .order_by(MandatoryExpense.id)
     )
 
-
     return list(result.all())
+
 
 async def find_mandatory_expense(
     session: AsyncSession,
     user_id: int,
     text: str,
 ) -> MandatoryExpense | None:
-
     expenses = await get_monthly_mandatory_expenses(
         session,
         user_id,
     )
 
-    print("========")
-    print("TEXT:", text)
+    lowered_text = text.lower()
 
     for expense in expenses:
-        print(
-            expense.name,
-            expense.amount,
-            expense.paid_amount,
-        )
-
-    text = text.lower()
-
-    for expense in expenses:
-        if expense.name.lower() in text:
-            print("FOUND:", expense.name)
+        if expense.name.lower() in lowered_text:
             return expense
-
-    print("NOT FOUND")
 
     return None
 
@@ -391,7 +402,6 @@ async def pay_mandatory_expense(
     expense: MandatoryExpense,
     payment_amount: int,
 ) -> int:
-
     remaining = max(
         expense.amount - expense.paid_amount,
         0,
@@ -412,11 +422,12 @@ async def pay_mandatory_expense(
     await session.refresh(expense)
 
     return applied
+
+
 async def get_main_message_id(
     session: AsyncSession,
     user_id: int,
 ) -> int | None:
-
     user = await session.get(
         User,
         user_id,
@@ -433,7 +444,6 @@ async def save_main_message_id(
     user_id: int,
     message_id: int,
 ) -> None:
-
     user = await session.get(
         User,
         user_id,
@@ -451,7 +461,6 @@ async def get_category_statistics(
     session: AsyncSession,
     user_id: int,
 ) -> list[tuple[str, int]]:
-
     result = await session.execute(
         select(
             Transaction.category,
@@ -480,7 +489,6 @@ async def get_financial_totals(
     session: AsyncSession,
     user_id: int,
 ) -> tuple[int, int, int]:
-
     income = int(
         await session.scalar(
             select(
@@ -515,6 +523,7 @@ async def get_financial_totals(
 
     return income, expenses, balance
 
+
 async def add_credit_card_debt(
     session: AsyncSession,
     user_id: int,
@@ -528,6 +537,7 @@ async def add_credit_card_debt(
     if credit_card is None:
         credit_card = CreditCard(
             user_id=user_id,
+            credit_limit=DEFAULT_CREDIT_LIMIT,
             balance=0,
         )
         session.add(credit_card)
@@ -553,6 +563,7 @@ async def pay_credit_card_debt(
     if credit_card is None:
         credit_card = CreditCard(
             user_id=user_id,
+            credit_limit=DEFAULT_CREDIT_LIMIT,
             balance=0,
         )
         session.add(credit_card)
@@ -567,8 +578,6 @@ async def pay_credit_card_debt(
 
     return credit_card.balance
 
-from database.models import SavingGoal
-
 
 async def create_saving_goal(
     session: AsyncSession,
@@ -576,7 +585,6 @@ async def create_saving_goal(
     name: str,
     target_amount: int,
 ) -> SavingGoal:
-
     goal = SavingGoal(
         user_id=user_id,
         name=name,
@@ -596,9 +604,9 @@ async def get_saving_goals(
     session: AsyncSession,
     user_id: int,
 ) -> list[SavingGoal]:
-
     result = await session.scalars(
-        select(SavingGoal).where(
+        select(SavingGoal)
+        .where(
             SavingGoal.user_id == user_id
         )
         .order_by(SavingGoal.id)
@@ -612,16 +620,15 @@ async def find_saving_goal(
     user_id: int,
     name: str,
 ) -> SavingGoal | None:
-
     goals = await get_saving_goals(
         session,
         user_id,
     )
 
-    name = name.lower()
+    lowered_name = name.lower()
 
     for goal in goals:
-        if goal.name.lower() in name:
+        if goal.name.lower() in lowered_name:
             return goal
 
     return None
@@ -632,7 +639,6 @@ async def add_to_saving_goal(
     goal: SavingGoal,
     amount: int,
 ) -> SavingGoal:
-
     goal.saved_amount += amount
 
     if goal.saved_amount > goal.target_amount:
@@ -643,14 +649,12 @@ async def add_to_saving_goal(
 
     return goal
 
+
 async def find_category_keyword(
     session: AsyncSession,
     user_id: int,
     keyword: str,
 ) -> str | None:
-
-    from database.models import CategoryKeyword
-
     result = await session.scalar(
         select(CategoryKeyword).where(
             CategoryKeyword.user_id == user_id,
@@ -670,9 +674,6 @@ async def save_category_keyword(
     keyword: str,
     category: str,
 ) -> None:
-
-    from database.models import CategoryKeyword
-
     item = CategoryKeyword(
         user_id=user_id,
         keyword=keyword.lower(),
@@ -683,16 +684,11 @@ async def save_category_keyword(
 
     await session.commit()
 
-from sqlalchemy import distinct
-
 
 async def get_user_categories(
     session: AsyncSession,
     user_id: int,
 ) -> list[str]:
-
-    from database.models import CategoryKeyword
-
     result = await session.scalars(
         select(
             distinct(CategoryKeyword.category)
@@ -703,22 +699,11 @@ async def get_user_categories(
 
     return list(result.all())
 
+
 async def clear_user_data(
-    session,
+    session: AsyncSession,
     user_id: int,
-):
-    from database.models import (
-        Transaction,
-        SavingGoal,
-        CategoryKeyword,
-        CreditCard,
-        MandatoryTemplate,
-        MandatoryExpense,
-    )
-
-    from sqlalchemy import delete
-
-
+) -> None:
     await session.execute(
         delete(Transaction).where(
             Transaction.user_id == user_id
@@ -757,12 +742,12 @@ async def clear_user_data(
 
     await session.commit()
 
+
 async def get_history(
     session: AsyncSession,
     user_id: int,
     limit: int = 20,
 ) -> list[Transaction]:
-
     result = await session.scalars(
         select(Transaction)
         .where(
@@ -776,11 +761,11 @@ async def get_history(
 
     return list(result.all())
 
+
 async def get_last_transaction(
     session: AsyncSession,
     user_id: int,
 ) -> Transaction | None:
-
     result = await session.scalar(
         select(Transaction)
         .where(
@@ -801,14 +786,24 @@ async def get_last_transaction(
     return result
 
 
-
 async def delete_transaction(
     session: AsyncSession,
     transaction: Transaction,
 ) -> None:
+    if (
+        transaction.is_credit_card
+        and transaction.operation_type == "expense"
+    ):
+        credit_card = await session.get(
+            CreditCard,
+            transaction.user_id,
+        )
 
-    await session.delete(
-        transaction
-    )
+        if credit_card is not None:
+            credit_card.balance = max(
+                credit_card.balance - transaction.amount,
+                0,
+            )
 
+    await session.delete(transaction)
     await session.commit()

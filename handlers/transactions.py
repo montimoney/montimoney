@@ -113,6 +113,7 @@ async def choose_category(
             amount=data["amount"],
             description=data["description"],
             category=category,
+            is_credit_card=data.get("is_credit_card", False),
         )
 
         await save_category_keyword(
@@ -264,6 +265,7 @@ async def handle_text(
                 amount=amount,
                 description=description,
                 category=category,
+                is_credit_card=credit_card,
             )
 
             if credit_card:
@@ -381,7 +383,8 @@ async def handle_text(
             amount=amount,
             description=description,
             category=category,
-        )
+            is_credit_card=credit_card,
+            )
 
         if credit_card:
             await add_credit_card_debt(

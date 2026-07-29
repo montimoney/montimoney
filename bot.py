@@ -1,8 +1,7 @@
 import asyncio
 import logging
 
-from aiogram import BaseMiddleware, Bot, Dispatcher
-from aiogram.types import TelegramObject
+from aiogram import Bot, Dispatcher
 
 from config import config
 from database.db import create_database
@@ -19,44 +18,16 @@ from handlers.transactions import router as transactions_router
 from handlers.undo import router as undo_router
 
 
-class UpdateLoggerMiddleware(BaseMiddleware):
-    async def __call__(
-        self,
-        handler,
-        event: TelegramObject,
-        data: dict,
-    ):
-        print("\n📩 ПОЛУЧЕНО ОБНОВЛЕНИЕ:")
-        print(event)
-
-        try:
-            return await handler(event, data)
-        except Exception:
-            logging.exception("❌ Ошибка при обработке обновления")
-            raise
-
-
 async def main() -> None:
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    )
 
     await create_database()
 
     bot = Bot(token=config.bot_token)
     dispatcher = Dispatcher()
-
-    bot_info = await bot.get_me()
-
-    print(f"🤖 Запущен бот: @{bot_info.username}")
-    print(f"🆔 ID бота: {bot_info.id}")
-
-    webhook_info = await bot.get_webhook_info()
-
-    print(f"🌐 Webhook: {webhook_info.url or 'не установлен'}")
-    print(f"📨 Ожидающих обновлений: {webhook_info.pending_update_count}")
-
-    await bot.delete_webhook(drop_pending_updates=True)
-
-    dispatcher.update.outer_middleware(UpdateLoggerMiddleware())
 
     dispatcher.include_router(cancel_router)
     dispatcher.include_router(clear_router)
@@ -69,8 +40,15 @@ async def main() -> None:
     dispatcher.include_router(advice_router)
     dispatcher.include_router(transactions_router)
 
-    print("✅ MonttiMoney запущен!")
-    print("📡 Ожидаю сообщения из Telegram...")
+    await bot.delete_webhook(drop_pending_updates=True)
+
+    bot_info = await bot.get_me()
+
+    logging.info(
+        "MonttiMoney запущен: @%s, bot_id=%s",
+        bot_info.username,
+        bot_info.id,
+    )
 
     try:
         await dispatcher.start_polling(
