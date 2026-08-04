@@ -738,6 +738,23 @@ async def get_user_categories(
 
     return list(result.all())
 
+async def delete_user_category(
+    session: AsyncSession,
+    user_id: int,
+    category: str,
+) -> int:
+    category_name = category.strip().lower()
+
+    result = await session.execute(
+        delete(CategoryKeyword).where(
+            CategoryKeyword.user_id == user_id,
+            func.lower(CategoryKeyword.category) == category_name,
+        )
+    )
+
+    await session.commit()
+
+    return result.rowcount or 0
 
 async def clear_user_data(
     session: AsyncSession,

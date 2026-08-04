@@ -6,7 +6,10 @@ import asyncio
 from keyboards.settings import settings_keyboard
 from keyboards.main import main_keyboard
 from keyboards.mandatory import mandatory_keyboard
-from keyboards.correction import correction_keyboard
+from keyboards.correction import (
+    correction_keyboard,
+    build_category_delete_keyboard,
+)
 
 from database.session import session_factory
 from database.repository import (
@@ -17,6 +20,8 @@ from database.repository import (
     clear_user_data,
     get_credit_card_balance,
     set_credit_card_spent,
+    get_user_categories,
+    delete_user_category,
 )
 from database.models import MandatoryTemplate
 
@@ -31,7 +36,9 @@ from utils.states import (
     MandatoryEditState,
     MandatoryDeleteState,
     CreditCorrectionState,
+    CategoryDeleteState,
 )
+
 
 from utils.messages import delete_user_message
 from utils.screens import show_screen
@@ -732,7 +739,87 @@ async def correction_available_finish(
 
     await show_main_screen(message)
 
+@router.message(F.text == "🗑 Удалить категорию")
+async def delete_category_start(
+    message: Message,
+    state: FSMContext,
+):
+    if message.from_user is None:
+        return
 
+    await delete_user_message(message)
+
+    async with session_factory() as session:
+        categories = await get_user_categories(
+            session=session,
+            user_id=message.from_user.id,
+        )
+
+    if not categories:
+        await message.answer(
+            "Пользовательских категорий пока нет 🐱",
+            reply_markup=correction_keyboard,
+        )
+        return
+
+    await state.set_state(
+        CategoryDeleteState.waiting_category
+    )
+
+    await message.answer(
+        "🗑 Выбери категорию, которую нужно удалить.\n\n"
+        "Старые расходы в истории останутся.",
+        reply_markup=build_category_delete_keyboard(
+            categories
+        ),
+    )
+
+
+@router.message(CategoryDeleteState.waiting_category)
+async def delete_category_finish(
+    message: Message,
+    state: FSMContext,
+):
+    if message.from_user is None:
+        return
+
+    if message.text is None:
+        return
+
+    if message.text == "⬅️ Назад в корректировку":
+        await state.clear()
+
+        await message.answer(
+            "🛠 Корректировка\n\nВыбери действие:",
+            reply_markup=correction_keyboard,
+        )
+        return
+
+    category = message.text.removeprefix("🗑 ").strip()
+
+    async with session_factory() as session:
+        deleted_count = await delete_user_category(
+            session=session,
+            user_id=message.from_user.id,
+            category=category,
+        )
+
+    await state.clear()
+    await delete_user_message(message)
+
+    if deleted_count == 0:
+        text = "Не удалось найти такую категорию 🐱"
+    else:
+        text = (
+            f"✅ Категория «{category}» удалена.\n\n"
+            "Старые операции остались в истории."
+        )
+
+    await message.answer(
+        text,
+        reply_markup=correction_keyboard,
+    )
+    
 @router.message(F.text == "⬅️ Назад в настройки")
 async def back_to_settings(
     message: Message,
@@ -749,7 +836,7 @@ async def back_to_settings(
         ),
         reply_markup=settings_keyboard,
     )
-    
+
 @router.message(F.text == "⬅️ Назад")
 async def back_to_main(message: Message):
 

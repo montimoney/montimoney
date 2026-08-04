@@ -26,3 +26,6 @@ class AdviceState(StatesGroup):
 class CreditCorrectionState(StatesGroup):
     waiting_spent = State()
     waiting_available = State()
+
+class CategoryDeleteState(StatesGroup):
+    waiting_category = State()
