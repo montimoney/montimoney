@@ -6,6 +6,7 @@ import asyncio
 from keyboards.settings import settings_keyboard
 from keyboards.main import main_keyboard
 from keyboards.mandatory import mandatory_keyboard
+from keyboards.correction import correction_keyboard
 
 from database.session import session_factory
 from database.repository import (
@@ -14,6 +15,8 @@ from database.repository import (
     update_mandatory_template,
     disable_mandatory_template,
     clear_user_data,
+    get_credit_card_balance,
+    set_credit_card_spent,
 )
 from database.models import MandatoryTemplate
 
@@ -27,6 +30,7 @@ from utils.states import (
     MandatoryAddState,
     MandatoryEditState,
     MandatoryDeleteState,
+    CreditCorrectionState,
 )
 
 from utils.messages import delete_user_message
@@ -532,6 +536,220 @@ async def delete_name(
         "Не нашёл такой расход 🐱"
     )
 
+@router.message(F.text == "🛠 Корректировка")
+async def open_correction_menu(
+    message: Message,
+):
+    if message.from_user is None:
+        return
+
+    await delete_user_message(message)
+
+    async with session_factory() as session:
+        (
+            credit_limit,
+            credit_spent,
+            credit_available,
+        ) = await get_credit_card_balance(
+            session,
+            message.from_user.id,
+        )
+
+    await show_screen(
+        message,
+        (
+            "🛠 <b>Корректировка кредитки</b>\n\n"
+            f"Лимит: {format_money(credit_limit)}\n"
+            f"Потрачено: {format_money(credit_spent)}\n"
+            f"Осталось: {format_money(credit_available)}\n\n"
+            "Что хочешь указать?"
+        ),
+        reply_markup=correction_keyboard,
+    )
+
+
+@router.message(F.text == "💳 Указать потраченное")
+async def correction_spent_start(
+    message: Message,
+    state: FSMContext,
+):
+    await delete_user_message(message)
+
+    await state.set_state(
+        CreditCorrectionState.waiting_spent
+    )
+
+    await message.answer(
+        "💳 Напиши правильную сумму, которая сейчас "
+        "потрачена с кредитки.\n\n"
+        "Например: <b>32500</b>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(CreditCorrectionState.waiting_spent)
+async def correction_spent_finish(
+    message: Message,
+    state: FSMContext,
+):
+    if message.from_user is None:
+        return
+
+    if message.text is None:
+        return
+
+    clean_amount = (
+        message.text
+        .replace(" ", "")
+        .replace("₽", "")
+    )
+
+    if not clean_amount.isdigit():
+        await message.answer(
+            "Напиши сумму только цифрами 🐱\n"
+            "Например: 32500"
+        )
+        return
+
+    spent_amount = int(clean_amount)
+
+    async with session_factory() as session:
+        (
+            credit_limit,
+            credit_spent,
+            credit_available,
+        ) = await set_credit_card_spent(
+            session=session,
+            user_id=message.from_user.id,
+            spent_amount=spent_amount,
+        )
+
+    await state.clear()
+
+    await message.answer(
+        (
+            "✅ Кредитка скорректирована\n\n"
+            f"Лимит: {format_money(credit_limit)}\n"
+            f"Потрачено: {format_money(credit_spent)}\n"
+            f"Осталось: {format_money(credit_available)}"
+        ),
+        reply_markup=main_keyboard,
+    )
+
+    await show_main_screen(message)
+
+
+@router.message(F.text == "💳 Указать остаток")
+async def correction_available_start(
+    message: Message,
+    state: FSMContext,
+):
+    await delete_user_message(message)
+
+    await state.set_state(
+        CreditCorrectionState.waiting_available
+    )
+
+    await message.answer(
+        "💳 Напиши правильный доступный остаток "
+        "на кредитке.\n\n"
+        "Например: <b>187500</b>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(CreditCorrectionState.waiting_available)
+async def correction_available_finish(
+    message: Message,
+    state: FSMContext,
+):
+    if message.from_user is None:
+        return
+
+    if message.text is None:
+        return
+
+    clean_amount = (
+        message.text
+        .replace(" ", "")
+        .replace("₽", "")
+    )
+
+    if not clean_amount.isdigit():
+        await message.answer(
+            "Напиши сумму только цифрами 🐱\n"
+            "Например: 187500"
+        )
+        return
+
+    available_amount = int(clean_amount)
+
+    async with session_factory() as session:
+        (
+            credit_limit,
+            current_spent,
+            current_available,
+        ) = await get_credit_card_balance(
+            session,
+            message.from_user.id,
+        )
+
+        if available_amount > credit_limit:
+            await message.answer(
+                (
+                    "Остаток не может быть больше лимита.\n\n"
+                    f"Текущий лимит: "
+                    f"{format_money(credit_limit)}"
+                )
+            )
+            return
+
+        spent_amount = (
+            credit_limit - available_amount
+        )
+
+        (
+            credit_limit,
+            credit_spent,
+            credit_available,
+        ) = await set_credit_card_spent(
+            session=session,
+            user_id=message.from_user.id,
+            spent_amount=spent_amount,
+        )
+
+    await state.clear()
+
+    await message.answer(
+        (
+            "✅ Кредитка скорректирована\n\n"
+            f"Лимит: {format_money(credit_limit)}\n"
+            f"Потрачено: {format_money(credit_spent)}\n"
+            f"Осталось: {format_money(credit_available)}"
+        ),
+        reply_markup=main_keyboard,
+    )
+
+    await show_main_screen(message)
+
+
+@router.message(F.text == "⬅️ Назад в настройки")
+async def back_to_settings(
+    message: Message,
+    state: FSMContext,
+):
+    await state.clear()
+    await delete_user_message(message)
+
+    await show_screen(
+        message,
+        (
+            "⚙️ <b>Настройки</b>\n\n"
+            "Выбери раздел:"
+        ),
+        reply_markup=settings_keyboard,
+    )
+    
 @router.message(F.text == "⬅️ Назад")
 async def back_to_main(message: Message):
 

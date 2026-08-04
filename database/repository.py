@@ -549,6 +549,45 @@ async def add_credit_card_debt(
 
     return credit_card.balance
 
+async def set_credit_card_spent(
+    session: AsyncSession,
+    user_id: int,
+    spent_amount: int,
+) -> tuple[int, int, int]:
+    credit_card = await session.get(
+        CreditCard,
+        user_id,
+    )
+
+    if credit_card is None:
+        credit_card = CreditCard(
+            user_id=user_id,
+            credit_limit=DEFAULT_CREDIT_LIMIT,
+            balance=0,
+        )
+        session.add(credit_card)
+
+    credit_card.balance = max(
+        0,
+        min(
+            spent_amount,
+            credit_card.credit_limit,
+        ),
+    )
+
+    await session.commit()
+    await session.refresh(credit_card)
+
+    available_amount = (
+        credit_card.credit_limit
+        - credit_card.balance
+    )
+
+    return (
+        credit_card.credit_limit,
+        credit_card.balance,
+        available_amount,
+    )
 
 async def pay_credit_card_debt(
     session: AsyncSession,

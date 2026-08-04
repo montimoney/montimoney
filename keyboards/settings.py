@@ -10,6 +10,11 @@ settings_keyboard = ReplyKeyboardMarkup(
         ],
         [
             KeyboardButton(
+                text="🛠 Корректировка",
+            ),
+        ],
+        [
+            KeyboardButton(
                 text="↩️ Отменить запись",
             ),
         ],

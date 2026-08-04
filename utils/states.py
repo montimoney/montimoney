@@ -21,4 +21,8 @@ class CategoryState(StatesGroup):
 
 class AdviceState(StatesGroup):
     waiting_exit = State()
-    
+
+
+class CreditCorrectionState(StatesGroup):
+    waiting_spent = State()
+    waiting_available = State()
