@@ -585,16 +585,213 @@ async def correction_spent_start(
 ):
     await delete_user_message(message)
 
-    await state.set_state(
-        CreditCorrectionState.waiting_spent
-    )
-
-    await message.answer(
+    bot_message = await message.answer(
         "💳 Напиши правильную сумму, которая сейчас "
         "потрачена с кредитки.\n\n"
         "Например: <b>32500</b>",
         parse_mode="HTML",
     )
+
+    await state.update_data(
+        bot_messages=[bot_message.message_id]
+    )
+
+    await state.set_state(
+        CreditCorrectionState.waiting_spent
+    )
+
+
+@router.message(CreditCorrectionState.waiting_spent)
+async def correction_spent_finish(
+    message: Message,
+    state: FSMContext,
+):
+    if message.from_user is None:
+        return
+
+    if message.text is None:
+        return
+
+    data = await state.get_data()
+    bot_messages = data.get("bot_messages", [])
+
+    bot_messages.append(message.message_id)
+
+    clean_amount = (
+        message.text
+        .replace(" ", "")
+        .replace("₽", "")
+    )
+
+    if not clean_amount.isdigit():
+        await delete_user_message(message)
+
+        await send_temp_message(
+            message,
+            "Напиши сумму только цифрами 🐱\n"
+            "Например: 32500",
+        )
+        return
+
+    spent_amount = int(clean_amount)
+
+    async with session_factory() as session:
+        (
+            credit_limit,
+            credit_spent,
+            credit_available,
+        ) = await set_credit_card_spent(
+            session=session,
+            user_id=message.from_user.id,
+            spent_amount=spent_amount,
+        )
+
+    result_message = await message.answer(
+        (
+            "✅ Кредитка скорректирована\n\n"
+            f"Лимит: {format_money(credit_limit)}\n"
+            f"Потрачено: {format_money(credit_spent)}\n"
+            f"Осталось: {format_money(credit_available)}"
+        ),
+        reply_markup=main_keyboard,
+    )
+
+    bot_messages.append(result_message.message_id)
+
+    await asyncio.sleep(2)
+
+    for message_id in bot_messages:
+        try:
+            await message.bot.delete_message(
+                chat_id=message.chat.id,
+                message_id=message_id,
+            )
+        except Exception:
+            pass
+
+    await state.clear()
+    await show_main_screen(message)
+
+
+@router.message(F.text == "💳 Указать остаток")
+async def correction_available_start(
+    message: Message,
+    state: FSMContext,
+):
+    await delete_user_message(message)
+
+    bot_message = await message.answer(
+        "💳 Напиши правильный доступный остаток "
+        "на кредитке.\n\n"
+        "Например: <b>187500</b>",
+        parse_mode="HTML",
+    )
+
+    await state.update_data(
+        bot_messages=[bot_message.message_id]
+    )
+
+    await state.set_state(
+        CreditCorrectionState.waiting_available
+    )
+
+
+@router.message(CreditCorrectionState.waiting_available)
+async def correction_available_finish(
+    message: Message,
+    state: FSMContext,
+):
+    if message.from_user is None:
+        return
+
+    if message.text is None:
+        return
+
+    data = await state.get_data()
+    bot_messages = data.get("bot_messages", [])
+
+    bot_messages.append(message.message_id)
+
+    clean_amount = (
+        message.text
+        .replace(" ", "")
+        .replace("₽", "")
+    )
+
+    if not clean_amount.isdigit():
+        await delete_user_message(message)
+
+        await send_temp_message(
+            message,
+            "Напиши сумму только цифрами 🐱\n"
+            "Например: 187500",
+        )
+        return
+
+    available_amount = int(clean_amount)
+
+    async with session_factory() as session:
+        (
+            credit_limit,
+            current_spent,
+            current_available,
+        ) = await get_credit_card_balance(
+            session,
+            message.from_user.id,
+        )
+
+        if available_amount > credit_limit:
+            await delete_user_message(message)
+
+            await send_temp_message(
+                message,
+                (
+                    "Остаток не может быть больше лимита.\n\n"
+                    f"Текущий лимит: "
+                    f"{format_money(credit_limit)}"
+                ),
+            )
+            return
+
+        spent_amount = (
+            credit_limit - available_amount
+        )
+
+        (
+            credit_limit,
+            credit_spent,
+            credit_available,
+        ) = await set_credit_card_spent(
+            session=session,
+            user_id=message.from_user.id,
+            spent_amount=spent_amount,
+        )
+
+    result_message = await message.answer(
+        (
+            "✅ Кредитка скорректирована\n\n"
+            f"Лимит: {format_money(credit_limit)}\n"
+            f"Потрачено: {format_money(credit_spent)}\n"
+            f"Осталось: {format_money(credit_available)}"
+        ),
+        reply_markup=main_keyboard,
+    )
+
+    bot_messages.append(result_message.message_id)
+
+    await asyncio.sleep(2)
+
+    for message_id in bot_messages:
+        try:
+            await message.bot.delete_message(
+                chat_id=message.chat.id,
+                message_id=message_id,
+            )
+        except Exception:
+            pass
+
+    await state.clear()
+    await show_main_screen(message)
 
 
 @router.message(CreditCorrectionState.waiting_spent)
