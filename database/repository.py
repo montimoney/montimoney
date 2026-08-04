@@ -743,18 +743,16 @@ async def delete_user_category(
     user_id: int,
     category: str,
 ) -> int:
-    category_name = category.strip().lower()
-
     result = await session.execute(
         delete(CategoryKeyword).where(
             CategoryKeyword.user_id == user_id,
-            func.lower(CategoryKeyword.category) == category_name,
+            CategoryKeyword.category == category.strip(),
         )
     )
 
     await session.commit()
 
-    return result.rowcount or 0
+    return max(result.rowcount or 0, 0)
 
 async def clear_user_data(
     session: AsyncSession,

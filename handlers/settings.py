@@ -40,7 +40,10 @@ from utils.states import (
 )
 
 
-from utils.messages import delete_user_message
+from utils.messages import (
+    delete_user_message,
+    send_temp_message,
+)
 from utils.screens import show_screen
 
 
@@ -756,17 +759,13 @@ async def delete_category_start(
         )
 
     if not categories:
-        await message.answer(
+        await send_temp_message(
+            message,
             "Пользовательских категорий пока нет 🐱",
-            reply_markup=correction_keyboard,
         )
         return
 
-    await state.set_state(
-        CategoryDeleteState.waiting_category
-    )
-
-    await message.answer(
+    bot_message = await message.answer(
         "🗑 Выбери категорию, которую нужно удалить.\n\n"
         "Старые расходы в истории останутся.",
         reply_markup=build_category_delete_keyboard(
@@ -774,7 +773,13 @@ async def delete_category_start(
         ),
     )
 
+    await state.update_data(
+        bot_messages=[bot_message.message_id]
+    )
 
+    await state.set_state(
+        CategoryDeleteState.waiting_category
+    )
 @router.message(CategoryDeleteState.waiting_category)
 async def delete_category_finish(
     message: Message,
@@ -786,11 +791,27 @@ async def delete_category_finish(
     if message.text is None:
         return
 
+    data = await state.get_data()
+    bot_messages = data.get("bot_messages", [])
+
+    bot_messages.append(message.message_id)
+
     if message.text == "⬅️ Назад в корректировку":
+        for message_id in bot_messages:
+            try:
+                await message.bot.delete_message(
+                    chat_id=message.chat.id,
+                    message_id=message_id,
+                )
+            except Exception:
+                pass
+
         await state.clear()
 
-        await message.answer(
-            "🛠 Корректировка\n\nВыбери действие:",
+        await show_screen(
+            message,
+            "🛠 <b>Корректировка кредитки</b>\n\n"
+            "Выбери действие:",
             reply_markup=correction_keyboard,
         )
         return
@@ -804,9 +825,6 @@ async def delete_category_finish(
             category=category,
         )
 
-    await state.clear()
-    await delete_user_message(message)
-
     if deleted_count == 0:
         text = "Не удалось найти такую категорию 🐱"
     else:
@@ -815,11 +833,26 @@ async def delete_category_finish(
             "Старые операции остались в истории."
         )
 
-    await message.answer(
+    result_message = await message.answer(
         text,
         reply_markup=correction_keyboard,
     )
-    
+
+    bot_messages.append(result_message.message_id)
+
+    await asyncio.sleep(2)
+
+    for message_id in bot_messages:
+        try:
+            await message.bot.delete_message(
+                chat_id=message.chat.id,
+                message_id=message_id,
+            )
+        except Exception:
+            pass
+
+    await state.clear()
+
 @router.message(F.text == "⬅️ Назад в настройки")
 async def back_to_settings(
     message: Message,
