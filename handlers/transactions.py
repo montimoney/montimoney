@@ -207,11 +207,23 @@ async def handle_text(
                 amount=amount,
             )
 
+            await add_transaction(
+                session=session,
+                user_id=message.from_user.id,
+                operation_type="expense",
+                amount=amount,
+                description="Погашение кредитки",
+                category="Кредитка",
+                is_credit_card=False,
+            )
+
             await send_temp_message(
                 message,
                 (
                     "💳 Кредитка погашена\n\n"
-                    f"Остаток долга: {balance} ₽"
+                    f"Внесено: {amount} ₽\n"
+                    f"Остаток долга: {balance} ₽\n\n"
+                    "💸 Сумма вычтена из общего баланса"
                 ),
             )
 
@@ -235,28 +247,146 @@ async def handle_text(
 
         if operation_type == "expense":
             mandatory_expense = await find_mandatory_expense(
+                    session=session,
+                    user_id=message.from_user.id,
+                    text=message.text,
+                )
+
+        # 4. Если нашли обязательный расход
+
+            if mandatory_expense is not None:
+                applied_amount = await pay_mandatory_expense(
+                    session=session,
+                    expense=mandatory_expense,
+                    payment_amount=amount,
+                )
+
+                category = await detect_category(
+                    session=session,
+                    user_id=message.from_user.id,
+                    text=description,
+                )
+
+                if category is None:
+                    category = "Обязательные расходы"
+
+                await add_transaction(
+                    session=session,
+                    user_id=message.from_user.id,
+                    operation_type=operation_type,
+                    amount=amount,
+                    description=description,
+                    category=category,
+                    is_credit_card=credit_card,
+                )
+
+                if credit_card:
+                    await add_credit_card_debt(
+                        session=session,
+                        user_id=message.from_user.id,
+                        amount=amount,
+                    )
+
+                remaining = max(
+                    mandatory_expense.amount
+                    - mandatory_expense.paid_amount,
+                    0,
+                )
+
+                if applied_amount == 0:
+                    mandatory_text = (
+                        "✅ Этот обязательный расход "
+                        "уже был полностью оплачен"
+                    )
+                elif remaining == 0:
+                    mandatory_text = (
+                        "✅ Обязательный расход оплачен полностью"
+                    )
+                else:
+                    mandatory_text = (
+                        "💅 Учтено в обязательных расходах\n"
+                        f"Осталось оплатить: {remaining} ₽"
+                    )
+
+                credit_card_text = (
+                    "\n💳 Сумма добавлена к долгу по кредитке"
+                    if credit_card
+                    else ""
+                )
+
+                await send_temp_message(
+                    message,
+                    (
+                        "💸 Расход добавлен\n\n"
+                        f"{description} — {amount} ₽\n\n"
+                        f"{mandatory_text}"
+                        f"{credit_card_text}"
+                    ),
+                )
+
+                await delete_user_message(message)
+                await show_main_screen(message)
+
+                return
+
+            # 5. Ищем обычную категорию
+
+            category = await detect_category(
                 session=session,
                 user_id=message.from_user.id,
                 text=message.text,
             )
 
-        # 4. Если нашли обязательный расход
+            # 6. Если категория неизвестна — спрашиваем пользователя
 
-        if mandatory_expense is not None:
-            applied_amount = await pay_mandatory_expense(
-                session=session,
-                expense=mandatory_expense,
-                payment_amount=amount,
-            )
+            if (
+                category is None
+                and operation_type == "expense"
+            ):
+                user_categories = await get_user_categories(
+                    session=session,
+                    user_id=message.from_user.id,
+                )
 
-            category = await detect_category(
-                session=session,
-                user_id=message.from_user.id,
-                text=description,
-            )
+                category_message = await message.answer(
+                    (
+                        "🐱 Не знаю, куда отнести:\n\n"
+                        f"<b>{description}</b>\n\n"
+                        "Выбери категорию "
+                        "или напиши свою:"
+                    ),
+                    reply_markup=build_category_keyboard(
+                        extra_categories=user_categories
+                    ),
+                    parse_mode="HTML",
+                )
 
-            if category is None:
-                category = "Обязательные расходы"
+                keyword_parts = description.split()
+
+                keyword = (
+                    keyword_parts[0].lower()
+                    if keyword_parts
+                    else description.lower()
+                )
+
+                await state.update_data(
+                    operation_type=operation_type,
+                    amount=amount,
+                    description=description,
+                    keyword=keyword,
+                    is_credit_card=credit_card,
+                    category_message_id=category_message.message_id,
+                )
+
+                await state.set_state(
+                    CategoryState.waiting_category
+                )
+
+                await delete_user_message(message)
+
+                return
+
+            # 7. Сохраняем обычную операцию
 
             await add_transaction(
                 session=session,
@@ -266,7 +396,7 @@ async def handle_text(
                 description=description,
                 category=category,
                 is_credit_card=credit_card,
-            )
+                )
 
             if credit_card:
                 await add_credit_card_debt(
@@ -275,26 +405,11 @@ async def handle_text(
                     amount=amount,
                 )
 
-            remaining = max(
-                mandatory_expense.amount
-                - mandatory_expense.paid_amount,
-                0,
+            text = (
+                "💰 Доход добавлен"
+                if operation_type == "income"
+                else "💸 Расход добавлен"
             )
-
-            if applied_amount == 0:
-                mandatory_text = (
-                    "✅ Этот обязательный расход "
-                    "уже был полностью оплачен"
-                )
-            elif remaining == 0:
-                mandatory_text = (
-                    "✅ Обязательный расход оплачен полностью"
-                )
-            else:
-                mandatory_text = (
-                    "💅 Учтено в обязательных расходах\n"
-                    f"Осталось оплатить: {remaining} ₽"
-                )
 
             credit_card_text = (
                 "\n💳 Сумма добавлена к долгу по кредитке"
@@ -305,115 +420,12 @@ async def handle_text(
             await send_temp_message(
                 message,
                 (
-                    "💸 Расход добавлен\n\n"
-                    f"{description} — {amount} ₽\n\n"
-                    f"{mandatory_text}"
+                    f"{text}\n\n"
+                    f"{description} — {amount} ₽"
                     f"{credit_card_text}"
                 ),
             )
 
-            await delete_user_message(message)
-            await show_main_screen(message)
+        await delete_user_message(message)
 
-            return
-
-        # 5. Ищем обычную категорию
-
-        category = await detect_category(
-            session=session,
-            user_id=message.from_user.id,
-            text=message.text,
-        )
-
-        # 6. Если категория неизвестна — спрашиваем пользователя
-
-        if (
-            category is None
-            and operation_type == "expense"
-        ):
-            user_categories = await get_user_categories(
-                session=session,
-                user_id=message.from_user.id,
-            )
-
-            category_message = await message.answer(
-                (
-                    "🐱 Не знаю, куда отнести:\n\n"
-                    f"<b>{description}</b>\n\n"
-                    "Выбери категорию "
-                    "или напиши свою:"
-                ),
-                reply_markup=build_category_keyboard(
-                    extra_categories=user_categories
-                ),
-                parse_mode="HTML",
-            )
-
-            keyword_parts = description.split()
-
-            keyword = (
-                keyword_parts[0].lower()
-                if keyword_parts
-                else description.lower()
-            )
-
-            await state.update_data(
-                operation_type=operation_type,
-                amount=amount,
-                description=description,
-                keyword=keyword,
-                is_credit_card=credit_card,
-                category_message_id=category_message.message_id,
-            )
-
-            await state.set_state(
-                CategoryState.waiting_category
-            )
-
-            await delete_user_message(message)
-
-            return
-
-        # 7. Сохраняем обычную операцию
-
-        await add_transaction(
-            session=session,
-            user_id=message.from_user.id,
-            operation_type=operation_type,
-            amount=amount,
-            description=description,
-            category=category,
-            is_credit_card=credit_card,
-            )
-
-        if credit_card:
-            await add_credit_card_debt(
-                session=session,
-                user_id=message.from_user.id,
-                amount=amount,
-            )
-
-        text = (
-            "💰 Доход добавлен"
-            if operation_type == "income"
-            else "💸 Расход добавлен"
-        )
-
-        credit_card_text = (
-            "\n💳 Сумма добавлена к долгу по кредитке"
-            if credit_card
-            else ""
-        )
-
-        await send_temp_message(
-            message,
-            (
-                f"{text}\n\n"
-                f"{description} — {amount} ₽"
-                f"{credit_card_text}"
-            ),
-        )
-
-    await delete_user_message(message)
-
-    await show_main_screen(message)
+        await show_main_screen(message)
