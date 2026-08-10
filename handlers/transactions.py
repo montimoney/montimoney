@@ -1,4 +1,4 @@
-from aiogram import F, Router
+from aiogram import Router
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
@@ -164,32 +164,6 @@ async def choose_category(
             f"{data['description']} — {data['amount']} ₽"
             f"{credit_card_text}"
         ),
-    )
-
-    await show_main_screen(message)
-
-@router.message(F.text == "исправить платеж 50000")
-async def fix_old_credit_payment(message: Message):
-    if message.from_user is None:
-        return
-
-    async with session_factory() as session:
-        await add_transaction(
-            session=session,
-            user_id=message.from_user.id,
-            operation_type="expense",
-            amount=50000,
-            description="Погашение кредитки",
-            category="Кредитка",
-            is_credit_card=False,
-        )
-
-    await delete_user_message(message)
-
-    await send_temp_message(
-        message,
-        "✅ Старый платеж 50 000 ₽ учтен в общем балансе.\n"
-        "Кредитка повторно не изменялась.",
     )
 
     await show_main_screen(message)
