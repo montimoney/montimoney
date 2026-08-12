@@ -174,7 +174,7 @@ planner_expense_actions_keyboard = ReplyKeyboardMarkup(
         ],
         [
             KeyboardButton(
-                text="🗑 Удалить",
+                text="🗑 Удалить трату",
             ),
         ],
         [

@@ -1128,7 +1128,7 @@ async def planner_expense_completed(
     await show_planner_screen(message)
 
 
-@router.message(F.text == "🗑 Удалить")
+@router.message(F.text == "🗑 Удалить трату")
 async def planner_expense_delete(
     message: Message,
     state: FSMContext,
