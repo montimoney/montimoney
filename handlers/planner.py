@@ -342,10 +342,17 @@ async def planner_back(
 ):
     await delete_user_message(message)
 
-    await delete_planner_message(
-        message=message,
-        state=state,
-    )
+    data = await state.get_data()
+    planner_message_id = data.get("planner_message_id")
+
+    if planner_message_id is not None:
+        try:
+            await message.bot.delete_message(
+                chat_id=message.chat.id,
+                message_id=planner_message_id,
+            )
+        except Exception:
+            pass
 
     await state.clear()
     await show_main_screen(message)
