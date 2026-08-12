@@ -8,6 +8,8 @@ from database.models import (
     CreditCard,
     MandatoryExpense,
     MandatoryTemplate,
+    PlannerExpense,
+    PlannerSalary,
     SavingGoal,
     Transaction,
     User,
@@ -877,3 +879,42 @@ async def delete_transaction(
 
     await session.delete(transaction)
     await session.commit()
+
+async def add_planner_salary(
+    session: AsyncSession,
+    user_id: int,
+    planned_date: date,
+    amount: int,
+) -> PlannerSalary:
+    salary = PlannerSalary(
+        user_id=user_id,
+        planned_date=planned_date,
+        amount=amount,
+        is_completed=False,
+    )
+
+    session.add(salary)
+
+    await session.commit()
+    await session.refresh(salary)
+
+    return salary
+
+
+async def get_planner_salaries(
+    session: AsyncSession,
+    user_id: int,
+    month: int,
+    year: int,
+) -> list[PlannerSalary]:
+    result = await session.scalars(
+        select(PlannerSalary)
+        .where(
+            PlannerSalary.user_id == user_id,
+            func.extract("month", PlannerSalary.planned_date) == month,
+            func.extract("year", PlannerSalary.planned_date) == year,
+        )
+        .order_by(PlannerSalary.planned_date)
+    )
+
+    return list(result.all())

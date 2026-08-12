@@ -1,8 +1,9 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
@@ -255,4 +256,77 @@ class SavingGoal(Base):
         DateTime,
         server_default=func.now(),
     )
-    
+
+class PlannerSalary(Base):
+    __tablename__ = "planner_salaries"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("users.telegram_id", ondelete="CASCADE"),
+        index=True,
+    )
+
+    planned_date: Mapped[date] = mapped_column(
+        Date,
+        index=True,
+    )
+
+    amount: Mapped[int] = mapped_column(
+        Integer,
+    )
+
+    is_completed: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+    )
+
+
+class PlannerExpense(Base):
+    __tablename__ = "planner_expenses"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("users.telegram_id", ondelete="CASCADE"),
+        index=True,
+    )
+
+    salary_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("planner_salaries.id", ondelete="CASCADE"),
+        index=True,
+    )
+
+    name: Mapped[str] = mapped_column(
+        String(100),
+    )
+
+    amount: Mapped[int] = mapped_column(
+        Integer,
+    )
+
+    is_completed: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+    )

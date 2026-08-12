@@ -27,5 +27,23 @@ class CreditCorrectionState(StatesGroup):
     waiting_spent = State()
     waiting_available = State()
 
+
 class CategoryDeleteState(StatesGroup):
     waiting_category = State()
+
+
+class PlannerAddState(StatesGroup):
+    waiting_salary_date = State()
+    waiting_salary_amount = State()
+    waiting_expense_salary = State()
+    waiting_expense_name = State()
+    waiting_expense_amount = State()
+
+
+class PlannerEditState(StatesGroup):
+    waiting_section = State()
+    waiting_salary = State()
+    waiting_expense_date = State()
+    waiting_expense = State()
+    waiting_new_amount = State()
+    waiting_move_salary = State()

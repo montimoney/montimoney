@@ -10,6 +10,7 @@ from handlers.advice import router as advice_router
 from handlers.cancel import router as cancel_router
 from handlers.clear import router as clear_router
 from handlers.history import router as history_router
+from handlers.planner import router as planner_router
 from handlers.savings import router as savings_router
 from handlers.settings import router as settings_router
 from handlers.start import router as start_router
@@ -38,6 +39,7 @@ async def main() -> None:
     dispatcher.include_router(history_router)
     dispatcher.include_router(undo_router)
     dispatcher.include_router(advice_router)
+    dispatcher.include_router(planner_router)
     dispatcher.include_router(transactions_router)
 
     await bot.delete_webhook(drop_pending_updates=True)

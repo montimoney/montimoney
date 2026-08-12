@@ -18,6 +18,11 @@ main_keyboard = ReplyKeyboardMarkup(
         ],
         [
             KeyboardButton(
+                text="📅 План месяца",
+            ),
+        ],
+        [
+            KeyboardButton(
                 text="💡 Совет дня",
             ),
         ],
