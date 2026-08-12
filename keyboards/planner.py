@@ -42,6 +42,7 @@ planner_add_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True,
 )
 
+
 planner_back_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [
@@ -52,6 +53,7 @@ planner_back_keyboard = ReplyKeyboardMarkup(
     ],
     resize_keyboard=True,
 )
+
 
 def planner_salary_choice_keyboard(
     salaries,
@@ -88,39 +90,17 @@ def planner_salary_choice_keyboard(
         resize_keyboard=True,
     )
 
-from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
-
-planner_keyboard = ReplyKeyboardMarkup(
+planner_edit_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [
             KeyboardButton(
-                text="➕ Добавить в план",
+                text="💰 Изменить зарплату",
             ),
         ],
         [
             KeyboardButton(
-                text="✏️ Изменить план",
-            ),
-        ],
-        [
-            KeyboardButton(
-                text="⬅️ Назад",
-            ),
-        ],
-    ],
-    resize_keyboard=True,
-)
-
-
-planner_add_keyboard = ReplyKeyboardMarkup(
-    keyboard=[
-        [
-            KeyboardButton(
-                text="💰 Зарплата",
-            ),
-            KeyboardButton(
-                text="💸 Траты",
+                text="💸 Изменить трату",
             ),
         ],
         [
@@ -132,33 +112,29 @@ planner_add_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True,
 )
 
-planner_back_keyboard = ReplyKeyboardMarkup(
-    keyboard=[
-        [
-            KeyboardButton(
-                text="⬅️ Назад в план",
-            ),
-        ],
-    ],
-    resize_keyboard=True,
-)
 
-def planner_salary_choice_keyboard(
-    salaries,
+def planner_expense_choice_keyboard(
+    expenses,
 ) -> ReplyKeyboardMarkup:
     buttons = []
 
-    for salary in salaries:
+    for expense in expenses:
         amount_text = (
-            f"{salary.amount:,}"
+            f"{expense.amount:,}"
             .replace(",", " ")
+        )
+
+        status = (
+            "✅ "
+            if expense.is_completed
+            else ""
         )
 
         buttons.append(
             [
                 KeyboardButton(
                     text=(
-                        f"💰 {salary.planned_date.strftime('%d.%m')} "
+                        f"{status}{expense.name} "
                         f"— {amount_text} ₽"
                     ),
                 )
@@ -177,3 +153,35 @@ def planner_salary_choice_keyboard(
         keyboard=buttons,
         resize_keyboard=True,
     )
+
+
+planner_expense_actions_keyboard = ReplyKeyboardMarkup(
+    keyboard=[
+        [
+            KeyboardButton(
+                text="✏️ Изменить сумму",
+            ),
+        ],
+        [
+            KeyboardButton(
+                text="↔️ Перенести",
+            ),
+        ],
+        [
+            KeyboardButton(
+                text="✅ Выполнено",
+            ),
+        ],
+        [
+            KeyboardButton(
+                text="🗑 Удалить",
+            ),
+        ],
+        [
+            KeyboardButton(
+                text="⬅️ Назад в план",
+            ),
+        ],
+    ],
+    resize_keyboard=True,
+)
