@@ -43,7 +43,7 @@ class PlannerAddState(StatesGroup):
 class PlannerEditState(StatesGroup):
     waiting_section = State()
     waiting_salary = State()
-    waiting_expense_date = State()
+    waiting_expense_salary = State()
     waiting_expense = State()
     waiting_new_amount = State()
     waiting_move_salary = State()

@@ -957,3 +957,87 @@ async def get_planner_expenses(
     )
 
     return list(result.all())
+
+async def get_planner_expense_by_id(
+    session: AsyncSession,
+    user_id: int,
+    expense_id: int,
+) -> PlannerExpense | None:
+    return await session.scalar(
+        select(PlannerExpense).where(
+            PlannerExpense.id == expense_id,
+            PlannerExpense.user_id == user_id,
+        )
+    )
+
+
+async def update_planner_expense_amount(
+    session: AsyncSession,
+    expense: PlannerExpense,
+    new_amount: int,
+) -> PlannerExpense:
+    expense.amount = new_amount
+
+    await session.commit()
+    await session.refresh(expense)
+
+    return expense
+
+
+async def move_planner_expense(
+    session: AsyncSession,
+    expense: PlannerExpense,
+    new_salary_id: int,
+) -> PlannerExpense:
+    expense.salary_id = new_salary_id
+
+    await session.commit()
+    await session.refresh(expense)
+
+    return expense
+
+
+async def toggle_planner_expense_completed(
+    session: AsyncSession,
+    expense: PlannerExpense,
+) -> PlannerExpense:
+    expense.is_completed = not expense.is_completed
+
+    await session.commit()
+    await session.refresh(expense)
+
+    return expense
+
+async def delete_planner_expense(
+    session: AsyncSession,
+    expense: PlannerExpense,
+) -> None:
+    await session.delete(expense)
+    await session.commit()
+
+
+async def get_planner_salaries_from_current_month(
+    session: AsyncSession,
+    user_id: int,
+) -> list[PlannerSalary]:
+    today = date.today()
+
+    first_day = date(
+        today.year,
+        today.month,
+        1,
+    )
+
+    result = await session.scalars(
+        select(PlannerSalary)
+        .where(
+            PlannerSalary.user_id == user_id,
+            PlannerSalary.planned_date >= first_day,
+        )
+        .order_by(
+            PlannerSalary.planned_date,
+            PlannerSalary.id,
+        )
+    )
+
+    return list(result.all())

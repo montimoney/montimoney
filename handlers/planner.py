@@ -7,9 +7,16 @@ from aiogram.types import Message
 from database.repository import (
     add_planner_expense,
     add_planner_salary,
+    delete_planner_expense,
+    get_planner_expense_by_id,
     get_planner_expenses,
-    get_planner_salaries,
+    get_planner_salaries_from_current_month,
+    move_planner_expense,
+    toggle_planner_expense_completed,
+    update_planner_expense_amount,
+    get_planner_salaries_from_current_month,
 )
+
 from database.session import session_factory
 
 from handlers.start import show_main_screen
@@ -17,13 +24,19 @@ from handlers.start import show_main_screen
 from keyboards.planner import (
     planner_add_keyboard,
     planner_back_keyboard,
+    planner_edit_keyboard,
+    planner_expense_actions_keyboard,
+    planner_expense_choice_keyboard,
     planner_keyboard,
     planner_salary_choice_keyboard,
 )
 
 from utils.messages import delete_user_message
 from utils.screens import show_screen
-from utils.states import PlannerAddState
+from utils.states import (
+    PlannerAddState,
+    PlannerEditState,
+)
 
 
 router = Router()
@@ -46,11 +59,9 @@ async def build_planner_text(
     now = datetime.now()
 
     async with session_factory() as session:
-        salaries = await get_planner_salaries(
+        salaries = await get_planner_salaries_from_current_month(
             session=session,
             user_id=user_id,
-            month=now.month,
-            year=now.year,
         )
 
         salary_expenses = {}
@@ -77,20 +88,48 @@ async def build_planner_text(
         12: "декабрь",
     }
 
-    title = f"📅 <b>План на {month_names[now.month]}</b>"
-
     if not salaries:
         return (
-            f"{title}\n\n"
+            "📅 <b>План</b>\n\n"
             "Пока здесь пусто 🐱"
         )
 
-    lines = [title, ""]
+    lines = [
+        "📅 <b>План</b>",
+        "",
+    ]
 
     total_salary = 0
     total_expenses = 0
 
+    current_group = None
+
     for salary in salaries:
+        group_key = (
+            salary.planned_date.year,
+            salary.planned_date.month,
+        )
+
+        if group_key != current_group:
+            current_group = group_key
+
+            month_name = month_names[
+                salary.planned_date.month
+            ].upper()
+
+            if salary.planned_date.year != now.year:
+                month_title = (
+                    f"{month_name} "
+                    f"{salary.planned_date.year}"
+                )
+            else:
+                month_title = month_name
+
+            lines.append(
+                f"━━━ <b>{month_title}</b> ━━━"
+            )
+            lines.append("")
+
         salary_status = (
             " ✅"
             if salary.is_completed
@@ -153,7 +192,12 @@ async def build_planner_text(
         total_expenses += salary_expense_total
 
     total_remaining = (
-        total_salary - total_expenses
+        total_salary
+        - total_expenses
+    )
+
+    lines.append(
+        "━━━ <b>ИТОГО</b> ━━━"
     )
 
     lines.append(
@@ -178,7 +222,6 @@ async def build_planner_text(
         )
 
     return "\n".join(lines)
-
 
 async def show_planner_screen(
     message: Message,
@@ -403,11 +446,10 @@ async def planner_expense_start(
     now = datetime.now()
 
     async with session_factory() as session:
-        salaries = await get_planner_salaries(
+        salaries = await get_planner_salaries_from_current_month(
             session=session,
             user_id=message.from_user.id,
-            month=now.month,
-            year=now.year,
+
         )
 
     if not salaries:
@@ -459,11 +501,9 @@ async def planner_expense_salary(
     now = datetime.now()
 
     async with session_factory() as session:
-        salaries = await get_planner_salaries(
+        salaries = await get_planner_salaries_from_current_month(
             session=session,
             user_id=message.from_user.id,
-            month=now.month,
-            year=now.year,
         )
 
     selected_salary = None
@@ -624,6 +664,499 @@ async def planner_expense_amount(
 
     await show_planner_screen(message)
 
+# --------------------
+# ИЗМЕНИТЬ ПЛАН
+# --------------------
+
+@router.message(F.text == "✏️ Изменить план")
+async def planner_edit_start(
+    message: Message,
+    state: FSMContext,
+):
+    await delete_user_message(message)
+    await state.clear()
+
+    await show_screen(
+        message=message,
+        text="✏️ <b>Что изменяем?</b>",
+        reply_markup=planner_edit_keyboard,
+        parse_mode="HTML",
+    )
+
+
+@router.message(F.text == "💸 Изменить трату")
+async def planner_edit_expense_start(
+    message: Message,
+    state: FSMContext,
+):
+    if message.from_user is None:
+        return
+
+    await delete_user_message(message)
+
+    now = datetime.now()
+
+    async with session_factory() as session:
+        salaries = await get_planner_salaries_from_current_month(
+            session=session,
+            user_id=message.from_user.id,
+        )
+
+    if not salaries:
+        await show_screen(
+            message=message,
+            text="🐱 В этом месяце пока нет зарплат.",
+            reply_markup=planner_back_keyboard,
+        )
+        return
+
+    await state.set_state(
+        PlannerEditState.waiting_expense_salary
+    )
+
+    await show_screen(
+        message=message,
+        text=(
+            "💸 <b>У какой зарплаты "
+            "находится трата?</b>"
+        ),
+        reply_markup=planner_salary_choice_keyboard(
+            salaries
+        ),
+        parse_mode="HTML",
+    )
+
+
+@router.message(
+    PlannerEditState.waiting_expense_salary
+)
+async def planner_edit_expense_salary(
+    message: Message,
+    state: FSMContext,
+):
+    if message.from_user is None:
+        return
+
+    if message.text is None:
+        return
+
+    selected_text = message.text.strip()
+
+    await delete_user_message(message)
+
+    now = datetime.now()
+
+    async with session_factory() as session:
+        salaries = await get_planner_salaries_from_current_month(
+            session=session,
+            user_id=message.from_user.id,
+        )
+
+        selected_salary = None
+
+        for salary in salaries:
+            if salary_button_text(salary) == selected_text:
+                selected_salary = salary
+                break
+
+        if selected_salary is None:
+            await show_screen(
+                message=message,
+                text=(
+                    "🐱 Не нашла эту зарплату.\n\n"
+                    "Выбери её кнопкой ниже."
+                ),
+                reply_markup=planner_salary_choice_keyboard(
+                    salaries
+                ),
+            )
+            return
+
+        expenses = await get_planner_expenses(
+            session=session,
+            user_id=message.from_user.id,
+            salary_id=selected_salary.id,
+        )
+
+    if not expenses:
+        await state.clear()
+
+        await show_screen(
+            message=message,
+            text=(
+                "🐱 У этой зарплаты пока нет трат."
+            ),
+            reply_markup=planner_back_keyboard,
+        )
+        return
+
+    await state.update_data(
+        edit_salary_id=selected_salary.id,
+    )
+
+    await state.set_state(
+        PlannerEditState.waiting_expense
+    )
+
+    await show_screen(
+        message=message,
+        text="💸 <b>Какую трату изменяем?</b>",
+        reply_markup=planner_expense_choice_keyboard(
+            expenses
+        ),
+        parse_mode="HTML",
+    )
+
+
+@router.message(
+    PlannerEditState.waiting_expense
+)
+async def planner_edit_expense_choice(
+    message: Message,
+    state: FSMContext,
+):
+    if message.from_user is None:
+        return
+
+    if message.text is None:
+        return
+
+    selected_text = message.text.strip()
+
+    await delete_user_message(message)
+
+    data = await state.get_data()
+    salary_id = data.get("edit_salary_id")
+
+    if salary_id is None:
+        await state.clear()
+        await show_planner_screen(message)
+        return
+
+    async with session_factory() as session:
+        expenses = await get_planner_expenses(
+            session=session,
+            user_id=message.from_user.id,
+            salary_id=salary_id,
+        )
+
+    selected_expense = None
+
+    for expense in expenses:
+        amount_text = (
+            f"{expense.amount:,}"
+            .replace(",", " ")
+        )
+
+        status = (
+            "✅ "
+            if expense.is_completed
+            else ""
+        )
+
+        button_text = (
+            f"{status}{expense.name} "
+            f"— {amount_text} ₽"
+        )
+
+        if button_text == selected_text:
+            selected_expense = expense
+            break
+
+    if selected_expense is None:
+        await show_screen(
+            message=message,
+            text=(
+                "🐱 Не нашла эту трату.\n\n"
+                "Выбери её кнопкой ниже."
+            ),
+            reply_markup=planner_expense_choice_keyboard(
+                expenses
+            ),
+        )
+        return
+
+    await state.update_data(
+        edit_expense_id=selected_expense.id,
+    )
+
+    await state.set_state(None)
+
+    await show_screen(
+        message=message,
+        text=(
+            f"💸 <b>{selected_expense.name}</b>\n"
+            f"{format_money(selected_expense.amount)}\n\n"
+            "Что делаем?"
+        ),
+        reply_markup=planner_expense_actions_keyboard,
+        parse_mode="HTML",
+    )
+
+# --------------------
+# ДЕЙСТВИЯ С ТРАТОЙ
+# --------------------
+
+@router.message(F.text == "✏️ Изменить сумму")
+async def planner_expense_change_amount_start(
+    message: Message,
+    state: FSMContext,
+):
+    await delete_user_message(message)
+
+    data = await state.get_data()
+
+    if data.get("edit_expense_id") is None:
+        await state.clear()
+        await show_planner_screen(message)
+        return
+
+    await state.set_state(
+        PlannerEditState.waiting_new_amount
+    )
+
+    await show_screen(
+        message=message,
+        text=(
+            "✏️ <b>Новая сумма</b>\n\n"
+            "Напиши новую сумму траты.\n"
+            "Например: <b>5500</b>"
+        ),
+        reply_markup=planner_back_keyboard,
+        parse_mode="HTML",
+    )
+
+
+@router.message(
+    PlannerEditState.waiting_new_amount
+)
+async def planner_expense_change_amount_finish(
+    message: Message,
+    state: FSMContext,
+):
+    if message.from_user is None:
+        return
+
+    if message.text is None:
+        return
+
+    text = message.text
+
+    await delete_user_message(message)
+
+    cleaned_amount = (
+        text
+        .replace(" ", "")
+        .replace("₽", "")
+        .strip()
+    )
+
+    try:
+        amount = int(cleaned_amount)
+
+        if amount <= 0:
+            raise ValueError
+
+    except ValueError:
+        await show_screen(
+            message=message,
+            text=(
+                "🐱 Не поняла сумму.\n\n"
+                "Напиши только число, например: "
+                "<b>5500</b>"
+            ),
+            reply_markup=planner_back_keyboard,
+            parse_mode="HTML",
+        )
+        return
+
+    data = await state.get_data()
+    expense_id = data.get("edit_expense_id")
+
+    async with session_factory() as session:
+        expense = await get_planner_expense_by_id(
+            session=session,
+            user_id=message.from_user.id,
+            expense_id=expense_id,
+        )
+
+        if expense is not None:
+            await update_planner_expense_amount(
+                session=session,
+                expense=expense,
+                new_amount=amount,
+            )
+
+    await state.clear()
+    await show_planner_screen(message)
+
+
+@router.message(F.text == "↔️ Перенести")
+async def planner_expense_move_start(
+    message: Message,
+    state: FSMContext,
+):
+    if message.from_user is None:
+        return
+
+    await delete_user_message(message)
+
+    data = await state.get_data()
+
+    if data.get("edit_expense_id") is None:
+        await state.clear()
+        await show_planner_screen(message)
+        return
+
+    now = datetime.now()
+
+    async with session_factory() as session:
+        salaries = await get_planner_salaries_from_current_month(
+               session=session,
+               user_id=message.from_user.id,
+        )
+
+    await state.set_state(
+        PlannerEditState.waiting_move_salary
+    )
+
+    await show_screen(
+        message=message,
+        text=(
+            "↔️ <b>К какой зарплате перенести трату?</b>"
+        ),
+        reply_markup=planner_salary_choice_keyboard(
+            salaries
+        ),
+        parse_mode="HTML",
+    )
+
+
+@router.message(
+    PlannerEditState.waiting_move_salary
+)
+async def planner_expense_move_finish(
+    message: Message,
+    state: FSMContext,
+):
+    if message.from_user is None:
+        return
+
+    if message.text is None:
+        return
+
+    selected_text = message.text.strip()
+
+    await delete_user_message(message)
+
+    data = await state.get_data()
+    expense_id = data.get("edit_expense_id")
+
+    now = datetime.now()
+
+    async with session_factory() as session:
+        salaries = await get_planner_salaries_from_current_month(
+              session=session,
+              user_id=message.from_user.id,
+        ) 
+
+        selected_salary = None
+
+        for salary in salaries:
+            if salary_button_text(salary) == selected_text:
+                selected_salary = salary
+                break
+
+        if selected_salary is None:
+            await show_screen(
+                message=message,
+                text=(
+                    "🐱 Не нашла эту зарплату.\n\n"
+                    "Выбери её кнопкой."
+                ),
+                reply_markup=planner_salary_choice_keyboard(
+                    salaries
+                ),
+            )
+            return
+
+        expense = await get_planner_expense_by_id(
+            session=session,
+            user_id=message.from_user.id,
+            expense_id=expense_id,
+        )
+
+        if expense is not None:
+            await move_planner_expense(
+                session=session,
+                expense=expense,
+                new_salary_id=selected_salary.id,
+            )
+
+    await state.clear()
+    await show_planner_screen(message)
+
+
+@router.message(F.text == "✅ Выполнено")
+async def planner_expense_completed(
+    message: Message,
+    state: FSMContext,
+):
+    if message.from_user is None:
+        return
+
+    await delete_user_message(message)
+
+    data = await state.get_data()
+    expense_id = data.get("edit_expense_id")
+
+    if expense_id is not None:
+        async with session_factory() as session:
+            expense = await get_planner_expense_by_id(
+                session=session,
+                user_id=message.from_user.id,
+                expense_id=expense_id,
+            )
+
+            if expense is not None:
+                await toggle_planner_expense_completed(
+                    session=session,
+                    expense=expense,
+                )
+
+    await state.clear()
+    await show_planner_screen(message)
+
+
+@router.message(F.text == "🗑 Удалить")
+async def planner_expense_delete(
+    message: Message,
+    state: FSMContext,
+):
+    if message.from_user is None:
+        return
+
+    await delete_user_message(message)
+
+    data = await state.get_data()
+    expense_id = data.get("edit_expense_id")
+
+    if expense_id is not None:
+        async with session_factory() as session:
+            expense = await get_planner_expense_by_id(
+                session=session,
+                user_id=message.from_user.id,
+                expense_id=expense_id,
+            )
+
+            if expense is not None:
+                await delete_planner_expense(
+                    session=session,
+                    expense=expense,
+                )
+
+    await state.clear()
+    await show_planner_screen(message)
 
 @router.message(F.text == "⬅️ Назад")
 async def planner_back(
