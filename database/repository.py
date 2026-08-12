@@ -918,3 +918,42 @@ async def get_planner_salaries(
     )
 
     return list(result.all())
+
+async def add_planner_expense(
+    session: AsyncSession,
+    user_id: int,
+    salary_id: int,
+    name: str,
+    amount: int,
+) -> PlannerExpense:
+    expense = PlannerExpense(
+        user_id=user_id,
+        salary_id=salary_id,
+        name=name,
+        amount=amount,
+        is_completed=False,
+    )
+
+    session.add(expense)
+
+    await session.commit()
+    await session.refresh(expense)
+
+    return expense
+
+
+async def get_planner_expenses(
+    session: AsyncSession,
+    user_id: int,
+    salary_id: int,
+) -> list[PlannerExpense]:
+    result = await session.scalars(
+        select(PlannerExpense)
+        .where(
+            PlannerExpense.user_id == user_id,
+            PlannerExpense.salary_id == salary_id,
+        )
+        .order_by(PlannerExpense.id)
+    )
+
+    return list(result.all())
